@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════
+   TRADEVEX BRAND SYSTEM
+   See the Setup. Know the Trade.
+   ═══════════════════════════════════════════════════════════ */
+
+@theme {
+  /* Brand colors */
+  --color-tv-navy-950: #05080f;
+  --color-tv-navy-900: #0a1628;
+  --color-tv-navy-800: #0f1e38;
+  --color-tv-navy-700: #1a2d4a;
+  --color-tv-navy-600: #2d4260;
+  --color-tv-gold-400: #e0c368;
+  --color-tv-gold-500: #d4af37;
+  --color-tv-gold-600: #b8942a;
+  --color-tv-emerald-400: #34d399;
+  --color-tv-emerald-500: #10b981;
+  --color-tv-crimson-400: #f87171;
+  --color-tv-crimson-500: #ef4444;
+
+  /* Fonts */
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Animations */
+  --animate-fade-in: fade-in 0.6s ease-out;
+  --animate-slide-up: slide-up 0.7s ease-out;
+  --animate-pulse-gold: pulse-gold 2s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(212, 175, 55, 0); }
+}
+
+/* Base styles */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #05080f;
+  color: #e5e7eb;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a1628;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a2d4a;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2d4260;
+}
+
+/* Selection */
+::selection {
+  background: rgba(212, 175, 55, 0.3);
+  color: #ffffff;
+}
