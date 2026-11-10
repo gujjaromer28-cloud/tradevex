@@ -26,7 +26,7 @@ const compressImage = (file: File): Promise<File> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 1200; // Max width to keep AI fast but clear
+        const MAX_WIDTH = 1200;
         const scale = MAX_WIDTH / img.width;
         canvas.width = MAX_WIDTH;
         canvas.height = img.height * scale;
@@ -43,7 +43,7 @@ const compressImage = (file: File): Promise<File> => {
             }
           },
           "image/jpeg",
-          0.8 // 80% quality
+          0.8
         );
       };
     };
@@ -101,19 +101,26 @@ export default function DashboardPage() {
     setResult(null);
 
     try {
-      // 1. Compress the image for faster upload
+      // 1. Get the current session (so we can send the token to the backend)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not logged in");
+
+      // 2. Compress the image
       const compressedImage = await compressImage(image);
 
-      // 2. Prepare the data
+      // 3. Prepare the form data
       const formData = new FormData();
       formData.append("image", compressedImage);
       formData.append("market", market);
       formData.append("pair", pair);
       formData.append("timeframe", timeframe);
 
-      // 3. Send to our API
+      // 4. Send to our API with the Auth token
       const res = await fetch("/api/analyze", {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: formData,
       });
       

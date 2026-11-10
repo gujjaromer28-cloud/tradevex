@@ -1,25 +1,40 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
+import { createClient } from "@supabase/supabase-js";
 
-// Initialize the new Google Gen AI SDK
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+// Initialize Groq
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
+
+// Initialize Supabase
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+);
 
 export async function POST(req: Request) {
   try {
+    // 1. Auth Check
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+
+    // 2. Get Data
     const formData = await req.formData();
     const file = formData.get("image") as File;
     const pair = formData.get("pair") as string;
     const timeframe = formData.get("timeframe") as string;
     const market = formData.get("market") as string;
 
-    if (!file) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: "No image provided" }, { status: 400 });
 
-    // Convert image to base64
+    // 3. Convert Image
     const bytes = await file.arrayBuffer();
     const base64Data = Buffer.from(bytes).toString("base64");
+    const imageUrl = `data:${file.type};base64,${base64Data}`;
 
+    // 4. Send to Groq
     const prompt = `
       You are an expert technical analyst. Analyze this ${timeframe} chart for ${pair} in the ${market} market.
       Look for trend, structure (BOS/CHoCH), liquidity sweeps, and key support/resistance.
@@ -38,26 +53,25 @@ export async function POST(req: Request) {
       Do not include markdown formatting like \`\`\`json. Return raw JSON only.
     `;
 
-    // Use the new gemini-3.8-flash model as required by the API
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: [
-        prompt,
+    // Using the new Qwen vision model
+    const completion = await groq.chat.completions.create({
+      messages: [
         {
-          inlineData: {
-            data: base64Data,
-            mimeType: file.type,
-          },
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: imageUrl } },
+          ],
         },
       ],
+      model: "qwen/qwen3.8-27b",
+      temperature: 0.1,
     });
 
-    const responseText = response.text || "";
-    
-    // Parse the JSON response
+    const responseText = completion.choices[0]?.message?.content || "";
     let analysisData;
+
     try {
-      // Clean up potential markdown formatting if the AI adds it anyway
       const cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
       analysisData = JSON.parse(cleanJson);
     } catch (e) {
@@ -69,13 +83,23 @@ export async function POST(req: Request) {
       };
     }
 
+    // 5. Save to Database
+    await supabase.from("analyses").insert({
+      user_id: user.id,
+      market, pair, timeframe,
+      status: analysisData.status,
+      direction: analysisData.direction,
+      entry: analysisData.entry || null,
+      stop_loss: analysisData.stopLoss || null,
+      take_profit: analysisData.takeProfit || null,
+      confidence: analysisData.confidence || null,
+      reasoning: analysisData.reasoning || null,
+    });
+
     return NextResponse.json(analysisData);
 
   } catch (error) {
     console.error("AI Analysis Error:", error);
-    return NextResponse.json(
-      { error: "Failed to analyze image. Check API key or server logs." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to analyze image." }, { status: 500 });
   }
 }
