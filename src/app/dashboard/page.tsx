@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { analyzeMarket } from "@/lib/engine";
 
 type AnalysisResult = {
   status: "VALID" | "NO_SETUP" | "INVALID";
@@ -54,7 +55,6 @@ export default function DashboardPage() {
       }
       setUserEmail(session.user.email || null);
       
-      // Check local storage for usage limits
       const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
       setAnalysesLeft(Math.max(0, 3 - used));
       
@@ -80,29 +80,62 @@ export default function DashboardPage() {
     setResult(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Not logged in");
+      // 1. Format the pair for Binance
+      let binancePair = pair.replace("/", "").toUpperCase();
+      if (!binancePair.endsWith("USDT") && !binancePair.endsWith("BUSD")) {
+        binancePair = binancePair.replace("USD", "USDT");
+      }
+      
+      // 2. Format the timeframe
+      let interval = "1h";
+      if (timeframe === "1M") interval = "1m";
+      if (timeframe === "5M") interval = "5m";
+      if (timeframe === "15M") interval = "15m";
+      if (timeframe === "4H") interval = "4h";
+      if (timeframe === "1D") interval = "1d";
 
-      const formData = new FormData();
-      formData.append("market", market);
-      formData.append("pair", pair);
-      formData.append("timeframe", timeframe);
+      // 3. Fetch live data from Binance directly in the browser
+      const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${interval}&limit=250`;
+      const marketRes = await fetch(binanceUrl);
+      
+      if (!marketRes.ok) {
+        throw new Error(`Failed to fetch live data for ${pair}. Make sure the pair exists on Binance.`);
+      }
+      
+      const rawData = await marketRes.json();
+      
+      // 4. Format candles
+      const candles = rawData.map((d: any) => ({
+        time: d[0],
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4]),
+      }));
 
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: formData,
-      });
-      
-      const data = await res.json();
-      
-      if (!res.ok) throw new Error(data.error || "Analysis failed");
-      
+      // 5. Run OUR Custom Engine
+      const data = analyzeMarket(candles, pair);
       setResult(data);
 
-      // Decrease limit
+      // 6. Save to Supabase (Silently fail if it doesn't work, but don't block the UI)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await supabase.from("analyses").insert({
+          user_id: session.user.id,
+          market: market,
+          pair: pair,
+          timeframe: timeframe,
+          status: data.status,
+          direction: data.direction,
+          entry: data.entry || null,
+          stop_loss: data.stopLoss || null,
+          take_profit: data.takeProfit || null,
+          confidence: data.confidence || null,
+          reasoning: data.reasoning || null,
+        });
+      }
+
+      // 7. Decrease limit
       const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
       const newUsed = used + 1;
       localStorage.setItem("tv_free_analyses_used", newUsed.toString());
@@ -141,6 +174,7 @@ export default function DashboardPage() {
             </h1>
           </Link>
           <div className="flex items-center gap-4 text-sm">
+            <Link href="/history" className="text-gray-400 hover:text-white transition-colors">History</Link>
             <span className="text-gray-400 hidden sm:block">{userEmail}</span>
             <button onClick={handleLogout} className="px-3 py-1.5 border border-[#2d4260] hover:border-[#d4af37] text-gray-300 hover:text-white rounded-md transition-colors">
               Log out
