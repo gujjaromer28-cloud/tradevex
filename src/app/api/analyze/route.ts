@@ -2,28 +2,27 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { analyzeMarket, type Candle } from "@/lib/engine";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-);
-
 export async function POST(req: Request) {
   try {
-    // 1. Auth Check
+    // 1. Initialize Supabase INSIDE the function so Vercel doesn't crash during build
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 2. Auth Check
     const authHeader = req.headers.get("authorization");
     if (!authHeader) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: "Invalid token" }, { status: 401 });
 
-    // 2. Get Data
+    // 3. Get Data
     const formData = await req.formData();
     const pair = (formData.get("pair") as string) || "BTCUSDT";
     const timeframe = (formData.get("timeframe") as string) || "1H";
     const market = (formData.get("market") as string) || "Crypto";
 
-    // 3. Fetch Market Data from Binance (Free, No Key Required)
-    // We format the pair (e.g. EUR/USD -> EURUSDT)
+    // 4. Fetch Market Data from Binance
     let binancePair = pair.replace("/", "").toUpperCase();
     if (!binancePair.endsWith("USDT") && !binancePair.endsWith("BUSD")) {
       binancePair = binancePair.replace("USD", "USDT");
@@ -40,12 +39,12 @@ export async function POST(req: Request) {
     
     const marketRes = await fetch(binanceUrl);
     if (!marketRes.ok) {
-      throw new Error(`Failed to fetch live data for ${pair}. Make sure the pair exists on Binance (e.g. BTCUSDT).`);
+      throw new Error(`Failed to fetch live data for ${pair}. Make sure the pair exists on Binance.`);
     }
     
     const rawData = await marketRes.json();
     
-    // 4. Format the data for our engine
+    // 5. Format the data for our engine
     const candles: Candle[] = rawData.map((d: any) => ({
       time: d[0],
       open: parseFloat(d[1]),
@@ -54,10 +53,10 @@ export async function POST(req: Request) {
       close: parseFloat(d[4]),
     }));
 
-    // 5. Run OUR Custom Engine
+    // 6. Run OUR Custom Engine
     const analysisData = analyzeMarket(candles, pair);
 
-    // 6. Save the analysis to Supabase
+    // 7. Save the analysis to Supabase
     await supabase.from("analyses").insert({
       user_id: user.id,
       market: market,
