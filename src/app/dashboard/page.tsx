@@ -33,30 +33,33 @@ export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Form State
   const [market, setMarket] = useState("Crypto");
   const [pair, setPair] = useState("BTCUSDT");
   const [timeframe, setTimeframe] = useState("1H");
 
-  // Analysis State
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   
-  // Free Limit State
   const [analysesLeft, setAnalysesLeft] = useState(3);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/login");
-        return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          router.push("/login");
+          return;
+        }
+        setUserEmail(session.user.email || null);
+      } catch (error) {
+        console.error("Auth check skipped during build");
       }
-      setUserEmail(session.user.email || null);
       
-      const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
-      setAnalysesLeft(Math.max(0, 3 - used));
+      if (typeof window !== "undefined") {
+        const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
+        setAnalysesLeft(Math.max(0, 3 - used));
+      }
       
       setLoading(false);
     };
@@ -80,13 +83,11 @@ export default function DashboardPage() {
     setResult(null);
 
     try {
-      // 1. Format the pair for Binance
       let binancePair = pair.replace("/", "").toUpperCase();
       if (!binancePair.endsWith("USDT") && !binancePair.endsWith("BUSD")) {
         binancePair = binancePair.replace("USD", "USDT");
       }
       
-      // 2. Format the timeframe
       let interval = "1h";
       if (timeframe === "1M") interval = "1m";
       if (timeframe === "5M") interval = "5m";
@@ -94,17 +95,15 @@ export default function DashboardPage() {
       if (timeframe === "4H") interval = "4h";
       if (timeframe === "1D") interval = "1d";
 
-      // 3. Fetch live data from Binance directly in the browser
       const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${interval}&limit=250`;
       const marketRes = await fetch(binanceUrl);
       
       if (!marketRes.ok) {
-        throw new Error(`Failed to fetch live data for ${pair}. Make sure the pair exists on Binance.`);
+        throw new Error(`Failed to fetch live data for ${pair}.`);
       }
       
       const rawData = await marketRes.json();
       
-      // 4. Format candles
       const candles = rawData.map((d: any) => ({
         time: d[0],
         open: parseFloat(d[1]),
@@ -113,11 +112,10 @@ export default function DashboardPage() {
         close: parseFloat(d[4]),
       }));
 
-      // 5. Run OUR Custom Engine
       const data = analyzeMarket(candles, pair);
       setResult(data);
 
-      // 6. Save to Supabase (Silently fail if it doesn't work, but don't block the UI)
+      // Save to Supabase
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         await supabase.from("analyses").insert({
@@ -135,18 +133,13 @@ export default function DashboardPage() {
         });
       }
 
-      // 7. Decrease limit
       const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
       const newUsed = used + 1;
       localStorage.setItem("tv_free_analyses_used", newUsed.toString());
       setAnalysesLeft(Math.max(0, 3 - newUsed));
 
     } catch (err) {
-      setResult({ 
-        status: "INVALID", 
-        direction: "NONE", 
-        error: String(err) 
-      });
+      setResult({ status: "INVALID", direction: "NONE", error: String(err) });
     } finally {
       setAnalyzing(false);
     }
@@ -162,7 +155,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#05080f] text-gray-100">
-      {/* Navbar */}
       <nav className="border-b border-[#1a2d4a] bg-[#0a1628] px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
@@ -183,7 +175,6 @@ export default function DashboardPage() {
         </div>
       </nav>
 
-      {/* Main Content */}
       <main className="max-w-5xl mx-auto p-6 py-12">
         <div className="mb-8 flex justify-between items-end">
           <div>
@@ -199,7 +190,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Left Side - Form */}
           <div className="space-y-6">
             <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6">
               <h3 className="text-white font-bold mb-4">Chart Details</h3>
@@ -252,7 +242,6 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {/* Right Side - Result */}
           <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6 h-full min-h-[400px]">
             <h3 className="text-white font-bold mb-4 border-b border-[#1a2d4a] pb-4">Analysis Result</h3>
             
@@ -317,7 +306,6 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* Upgrade Modal */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
           <div className="bg-[#0a1628] border border-[#d4af37] rounded-2xl p-8 max-w-md w-full text-center relative">
