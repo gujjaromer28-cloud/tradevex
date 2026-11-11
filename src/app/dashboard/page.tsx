@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
@@ -16,39 +16,16 @@ type AnalysisResult = {
   error?: string;
 };
 
-// Helper to compress the image before uploading to make it faster
-const compressImage = (file: File): Promise<File> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 1200;
-        const scale = MAX_WIDTH / img.width;
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-        
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              const newFile = new File([blob], file.name, { type: "image/jpeg", lastModified: Date.now() });
-              resolve(newFile);
-            } else {
-              resolve(file);
-            }
-          },
-          "image/jpeg",
-          0.8
-        );
-      };
-    };
-  });
-};
+const CRYPTO_PAIRS = [
+  "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+  "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT",
+  "MATICUSDT", "LTCUSDT", "TRXUSDT", "ATOMUSDT", "ETCUSDT",
+  "XLMUSDT", "BCHUSDT", "FILUSDT", "APTUSDT", "ARBUSDT"
+];
+
+const FOREX_PAIRS = [
+  "EURUSDT", "GBPUSDT", "AUDUSDT", "USDTTRY", "USDTBRL"
+];
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -57,15 +34,16 @@ export default function DashboardPage() {
 
   // Form State
   const [market, setMarket] = useState("Crypto");
-  const [pair, setPair] = useState("BTC/USDT");
+  const [pair, setPair] = useState("BTCUSDT");
   const [timeframe, setTimeframe] = useState("1H");
-  const [image, setImage] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
 
   // Analysis State
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Free Limit State
+  const [analysesLeft, setAnalysesLeft] = useState(3);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -75,6 +53,11 @@ export default function DashboardPage() {
         return;
       }
       setUserEmail(session.user.email || null);
+      
+      // Check local storage for usage limits
+      const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
+      setAnalysesLeft(Math.max(0, 3 - used));
+      
       setLoading(false);
     };
     checkUser();
@@ -85,37 +68,26 @@ export default function DashboardPage() {
     router.push("/");
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImage(file);
-      setPreview(URL.createObjectURL(file));
-      setResult(null);
-    }
-  };
-
   const handleAnalyze = async () => {
-    if (!image) return alert("Please upload an image first.");
+    if (analysesLeft <= 0) {
+      setShowUpgradeModal(true);
+      return;
+    }
+
+    if (!pair) return alert("Please select a pair.");
     
     setAnalyzing(true);
     setResult(null);
 
     try {
-      // 1. Get the current session (so we can send the token to the backend)
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not logged in");
 
-      // 2. Compress the image
-      const compressedImage = await compressImage(image);
-
-      // 3. Prepare the form data
       const formData = new FormData();
-      formData.append("image", compressedImage);
       formData.append("market", market);
       formData.append("pair", pair);
       formData.append("timeframe", timeframe);
 
-      // 4. Send to our API with the Auth token
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: {
@@ -129,6 +101,13 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error(data.error || "Analysis failed");
       
       setResult(data);
+
+      // Decrease limit
+      const used = parseInt(localStorage.getItem("tv_free_analyses_used") || "0", 10);
+      const newUsed = used + 1;
+      localStorage.setItem("tv_free_analyses_used", newUsed.toString());
+      setAnalysesLeft(Math.max(0, 3 - newUsed));
+
     } catch (err) {
       setResult({ 
         status: "INVALID", 
@@ -172,16 +151,24 @@ export default function DashboardPage() {
 
       {/* Main Content */}
       <main className="max-w-5xl mx-auto p-6 py-12">
-        <div className="mb-8">
-          <h2 className="text-3xl font-black text-white mb-2">Dashboard</h2>
-          <p className="text-gray-400">Upload a chart to get AI-powered analysis.</p>
+        <div className="mb-8 flex justify-between items-end">
+          <div>
+            <h2 className="text-3xl font-black text-white mb-2">Dashboard</h2>
+            <p className="text-gray-400">Select a market to get AI-powered analysis.</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Free Analyses Left</p>
+            <p className={`text-2xl font-black ${analysesLeft > 0 ? 'text-[#d4af37]' : 'text-red-400'}`}>
+              {analysesLeft} / 3
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Left Side - Upload Form */}
+          {/* Left Side - Form */}
           <div className="space-y-6">
             <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6">
-              <h3 className="text-white font-bold mb-4">1. Chart Details</h3>
+              <h3 className="text-white font-bold mb-4">Chart Details</h3>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -206,58 +193,46 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Pair</label>
-                  <input type="text" value={pair} onChange={(e) => setPair(e.target.value)} placeholder="e.g. BTC/USDT or EUR/USD" className="w-full bg-[#05080f] border border-[#1a2d4a] rounded-md px-3 py-2 text-white text-sm focus:outline-none focus:border-[#d4af37]" />
+                  <select value={pair} onChange={(e) => setPair(e.target.value)} className="w-full bg-[#05080f] border border-[#1a2d4a] rounded-md px-3 py-2 text-white text-sm focus:outline-none focus:border-[#d4af37]">
+                    <optgroup label="Crypto">
+                      {CRYPTO_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
+                    </optgroup>
+                    <optgroup label="Forex (via Binance)">
+                      {FOREX_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
+                    </optgroup>
+                  </select>
                 </div>
-              </div>
-            </div>
-
-            <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6">
-              <h3 className="text-white font-bold mb-4">2. Upload Screenshot</h3>
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-[#2d4260] hover:border-[#d4af37] rounded-xl p-8 text-center cursor-pointer transition-colors"
-              >
-                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
-                {preview ? (
-                  <img src={preview} alt="Preview" className="max-h-48 mx-auto rounded-md" />
-                ) : (
-                  <>
-                    <span className="text-3xl block mb-2">📸</span>
-                    <p className="text-sm text-gray-400">Click to upload or drag and drop</p>
-                    <p className="text-xs text-gray-600 mt-1">PNG, JPG up to 5MB</p>
-                  </>
-                )}
               </div>
             </div>
 
             <button 
               onClick={handleAnalyze} 
-              disabled={analyzing || !image}
+              disabled={analyzing || !pair}
               className="w-full py-3 bg-[#d4af37] hover:bg-[#e0c368] disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed text-[#0a1628] font-bold rounded-lg transition-colors flex justify-center items-center gap-2"
             >
               {analyzing ? (
-                <><span className="w-4 h-4 border-2 border-[#0a1628] border-t-transparent rounded-full animate-spin"></span> Analyzing Chart…</>
+                <><span className="w-4 h-4 border-2 border-[#0a1628] border-t-transparent rounded-full animate-spin"></span> Analyzing Market Data…</>
               ) : (
-                "Analyze with AI"
+                "Run Analysis"
               )}
             </button>
           </div>
 
-          {/* Right Side - AI Result */}
+          {/* Right Side - Result */}
           <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6 h-full min-h-[400px]">
-            <h3 className="text-white font-bold mb-4 border-b border-[#1a2d4a] pb-4">AI Analysis</h3>
+            <h3 className="text-white font-bold mb-4 border-b border-[#1a2d4a] pb-4">Analysis Result</h3>
             
             {!result && !analyzing && (
               <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-                <span className="text-4xl mb-4 opacity-20">🤖</span>
-                <p className="text-sm">Upload a chart to see the AI setup.</p>
+                <span className="text-4xl mb-4 opacity-20">📊</span>
+                <p className="text-sm">Select a pair to run the engine.</p>
               </div>
             )}
 
             {analyzing && (
               <div className="flex flex-col items-center justify-center h-64 text-[#d4af37]">
                 <span className="w-8 h-8 border-4 border-[#d4af37] border-t-transparent rounded-full animate-spin mb-4"></span>
-                <p className="text-sm animate-pulse">Scanning structure, liquidity, and trend…</p>
+                <p className="text-sm animate-pulse">Fetching live data and calculating...</p>
               </div>
             )}
 
@@ -307,6 +282,26 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
+
+      {/* Upgrade Modal */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0a1628] border border-[#d4af37] rounded-2xl p-8 max-w-md w-full text-center relative">
+            <button onClick={() => setShowUpgradeModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">✕</button>
+            <div className="text-4xl mb-4">🚀</div>
+            <h3 className="text-2xl font-black text-white mb-2">Upgrade to Premium</h3>
+            <p className="text-sm text-gray-400 mb-6">
+              You've used all 3 of your free analyses. Upgrade to Premium to get unlimited AI market analysis.
+            </p>
+            <button className="w-full py-3 bg-[#d4af37] hover:bg-[#e0c368] text-[#0a1628] font-bold rounded-lg mb-3 transition-colors">
+              Upgrade for $29/month
+            </button>
+            <button onClick={() => setShowUpgradeModal(false)} className="text-xs text-gray-500 hover:text-white">
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
